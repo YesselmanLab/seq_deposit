@@ -4,7 +4,6 @@ command line interface for seq_deposit script
 
 import os
 import shutil
-import typing import List
 import click
 import pandas as pd
 import yaml
@@ -88,7 +87,7 @@ def log_new_libaries(params, new_libs, codes):
     df_log.to_csv(path, index=False)
 
 
-def log_constructs(constructs : List):
+def log_constructs(constructs):
     """
     logs the new constructs
     :param constructs: the new constructs
@@ -103,6 +102,21 @@ def log_constructs(constructs : List):
         for c in constructs:
             f.write(c.to_csv_str() + "\n")
 
+
+def log_primers(primers):
+    """
+    logs the new primers
+    :param constructs: the new primers
+    :return: None
+    """
+    log = get_logger("log_primers")
+    log.info(
+        "seq-deposit-output/primers.csv to the primers.gsheet on oligo sheet"
+    )
+    with open("seq-deposit-output/primers.csv", "w") as f:
+        f.write("name,code,c_code,useable,a_temp,sequence,type\n")
+        for p in primers:
+            f.write(",".join([str(x) for x in p]) + "\n")
 
 
 # cli functions ###############################################################
@@ -197,18 +211,15 @@ def assembly(construct_csv, primer_csv, ignore_missing_t7, dry_run, overwrite):
         last_code = code
         constructs.append(centry)
     log_constructs(constructs)
-    log.info(
-        "seq-deposit-output/primers.csv to the primers.gsheet on oligo sheet"
-    )
-    with open("seq-deposit-output/primers.csv", "w") as f:
-        f.write("name,code,c_code,useable,a_temp,sequence,type\n")
-        for p in all_primers:
-            f.write(",".join([str(x) for x in p]) + "\n")
+    log_primers(all_primers)
     df_primers["primer_code"] = df_primers["primer_name"].apply(
         lambda x: p_codes[x]
     )
     df_primers["code"] = df_primers["name"].apply(lambda x: codes[x])
-    # for i, row in df_primers.iterrows():
+    df_primers = df_primers[
+        ["name", "code", "primer_num", "primer_name", "primer_code"]
+    ]
+    df_primers.to_csv("seq-deposit-output/assemblies.csv", index=False)
 
 
 if __name__ == "__main__":

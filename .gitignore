@@ -1,6 +1,10 @@
 *.py[cod]
 *.idea
 
+# generated files 
+seq_deposit/resources/all.csv
+seq_deposit/resources/primers.csv
+
 # mac
 .DS_Store
 
