@@ -1,3 +1,4 @@
 wheel>=0.22
-rna_seq_tools
 pyyaml
+pandas
+rna_seq_tools
