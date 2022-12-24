@@ -210,6 +210,7 @@ def fetch_primers_gsheet(params) -> pd.DataFrame:
     # remove last column that has nothing
     df = df.iloc[:, :-1]
     df.to_csv("temp.csv", index=False)
+    os.remove("temp.csv")
     os.remove("logs.csv")
     path = os.path.join(LIB_PATH, "resources", "primer.csv")
     df.to_csv(path, index=False)

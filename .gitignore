@@ -3,7 +3,7 @@
 
 # generated files 
 seq_deposit/resources/all.csv
-seq_deposit/resources/primers.csv
+seq_deposit/resources/primer.csv
 
 # mac
 .DS_Store

@@ -222,5 +222,21 @@ def assembly(construct_csv, primer_csv, ignore_missing_t7, dry_run, overwrite):
     df_primers.to_csv("seq-deposit-output/assemblies.csv", index=False)
 
 
+@cli.command(help="update deposit path")
+@click.argument("path")
+def set_deposit_path(path):
+    """
+    update deposit path
+    :param path: path to deposit
+    """
+    params = get_params()
+    if not os.path.exists(path):
+        raise ValueError(f"path {path} does not exist")
+    params["deposit_path"] = path
+    path = os.path.join(os.path.dirname(__file__), "resources", "params.yml")
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(params, f, default_flow_style=False, allow_unicode=True)
+
+
 if __name__ == "__main__":
     cli()
