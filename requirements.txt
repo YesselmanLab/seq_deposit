@@ -1,4 +1,5 @@
-wheel>=0.22
+click
+wheel >= 0.22
 pyyaml
 pandas
 rna_seq_tools

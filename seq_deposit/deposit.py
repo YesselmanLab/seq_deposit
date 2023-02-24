@@ -11,10 +11,13 @@ from seq_tools import (
     get_extinction_coeff,
     to_dna,
     to_fasta,
+    trim,
     transcribe,
 )
 
 from seq_deposit.logger import get_logger
+
+log = get_logger("deposit")
 
 
 def generate_dna_dataframe(df: pd.DataFrame) -> pd.DataFrame:
@@ -34,9 +37,7 @@ def generate_dna_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return df_dna
 
 
-def generate_rna_dataframe(
-    df: pd.DataFrame, ignore_missing_t7: bool
-) -> pd.DataFrame:
+def generate_rna_dataframe(df: pd.DataFrame, ignore_missing_t7: bool) -> pd.DataFrame:
     """
     generates the rna dataframe
     :param df: the dataframe with sequences
@@ -64,7 +65,6 @@ def deposit_dna_csv(
     """
     df = generate_dna_dataframe(df)
     if not dry_run:
-        log = get_logger("generate_dna_dataframe")
         log.info(f"writing dna csv to {deposit_path}/dna/")
         path = os.path.join(deposit_path, "dna", f"{code}.csv")
         df.to_csv(path, index=False)
@@ -87,15 +87,12 @@ def deposit_rna_csv(
     """
     df = generate_rna_dataframe(df, ignore_missing_t7)
     if not dry_run:
-        log = get_logger("generate_rna_dataframe")
         log.info(f"writing rna csv to {deposit_path}/rna/")
         path = os.path.join(deposit_path, "rna", f"{code}.csv")
         df.to_csv(path, index=False)
 
 
-def deposit_fasta_file(
-    df: pd.DataFrame, code, deposit_path, dry_run=False
-) -> None:
+def deposit_fasta_file(df: pd.DataFrame, code, deposit_path, dry_run=False) -> None:
     """
     generates the fasta file
     :param df: the dataframe with sequences
@@ -106,8 +103,8 @@ def deposit_fasta_file(
     """
     df = df.copy()
     df = df[["name", "sequence"]]
+    df = trim(df, 20, 0)
     if not dry_run:
-        log = get_logger("generate_fasta")
         path = os.path.join(deposit_path, "fastas", f"{code}.fasta")
         log.info(f"writing fasta file to {path}")
         to_fasta(df, path)

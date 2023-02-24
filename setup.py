@@ -44,7 +44,9 @@ setup(
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: Implementation :: PyPy",
     ],
-    entry_points={"console_scripts": [
-        "seq-deposit = seq_deposit.cli:cli",
-    ]},
+    entry_points={
+        "console_scripts": [
+            "seq-deposit = seq_deposit.cli:cli",
+        ]
+    },
 )
