@@ -125,7 +125,7 @@ def test_get_construct_entry_assembly_t7():
     """
     df = get_test_data_rna()
     df = to_dna(df)
-    df.iloc[0]["sequence"] = "TTCTAATACGACTCACTATA" + df.iloc[0]["sequence"]
+    df.at[0, "sequence"] = "TTCTAATACGACTCACTATA" + df.iloc[0]["sequence"]
     df = get_length(df)
     centry = get_construct_entry(df, "test_lib", "C0001", no_t7=False)
     assert centry.dna_len == len(df.iloc[0]["sequence"])
@@ -141,13 +141,13 @@ def test_get_construct_entry_assembly_p5():
     """
     df = get_test_data_rna()
     df = to_dna(df)
-    df.loc[0]["sequence"] = (
+    df.at[0, "sequence"] = (
         "TTCTAATACGACTCACTATA" + "GGCCAAAACAACGG" + df.iloc[0]["sequence"]
     )
     centry = get_construct_entry(df, "test_lib", "C0001")
     assert centry.seq_rev_p == "P0016"
     df.loc[1] = ["seq_1", "GGGGTTTTCCCC"]
-    df.loc[1]["sequence"] = (
+    df.at[1, "sequence"] = (
         "TTCTAATACGACTCACTATA" + "GGCCAATACAACGG" + df.iloc[0]["sequence"]
     )
     centry = get_construct_entry(df, "test_lib", "C0001")

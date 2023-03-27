@@ -2,4 +2,6 @@ click
 wheel >= 0.22
 pyyaml
 pandas
+wget
+# tools from the lab
 rna_seq_tools

@@ -2,9 +2,9 @@
 handles processing of google sheets data
 """
 import os
-import subprocess
 import pandas as pd
 from dataclasses import dataclass
+import wget
 
 from seq_deposit.logger import get_logger
 from seq_deposit.settings import LIB_PATH
@@ -12,6 +12,7 @@ from seq_deposit.settings import LIB_PATH
 import vienna
 from seq_tools import to_dna, get_length, trim
 
+log = get_logger("GSHEETS")
 
 @dataclass(order=True)
 class ConstructEntry:
@@ -167,13 +168,9 @@ def fetch_sequence_gsheet(params) -> pd.DataFrame:
     :return: dataframe of sequence sheet
     """
     gsheet_path = params["sequence_gsheet_url"]
-    subprocess.call(
-        f'wget --output-file="logs.csv" "{gsheet_path}" -O "temp.csv"',
-        shell=True,
-    )
+    wget.download(gsheet_path, "temp.csv")
     df = pd.read_csv("temp.csv")
     os.remove("temp.csv")
-    os.remove("logs.csv")
     cols = (
         "name,code,type,arrived,usuable,size,dna_len,dna_sequence,rna_len,"
         "rna_sequence,rna_structure,fwd_p,rev_p,rt_p,seq_fwd_p,project,"
@@ -192,10 +189,7 @@ def fetch_primers_gsheet(params) -> pd.DataFrame:
     :return: dataframe of primer sheet
     """
     gsheet_path = params["primer_gsheet_url"]
-    subprocess.call(
-        f'wget --output-file="logs.csv" "{gsheet_path}" -O "temp.csv"',
-        shell=True,
-    )
+    wget.download(gsheet_path, "temp.csv")
     cols = [
         "name",
         "code",
@@ -211,7 +205,6 @@ def fetch_primers_gsheet(params) -> pd.DataFrame:
     df = df.iloc[:, :-1]
     df.to_csv("temp.csv", index=False)
     os.remove("temp.csv")
-    os.remove("logs.csv")
     path = os.path.join(LIB_PATH, "resources", "primer.csv")
     df.to_csv(path, index=False)
     return df

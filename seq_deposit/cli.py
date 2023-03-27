@@ -22,6 +22,8 @@ from seq_deposit.gsheets import (
 
 # helper functions ############################################################
 
+log = get_logger("cli")
+
 
 def setup(ignore_missing_t7, dry_run, overwrite):
     """
@@ -30,7 +32,6 @@ def setup(ignore_missing_t7, dry_run, overwrite):
     """
     # setup logger
     setup_applevel_logger()
-    log = get_logger("setup")
     # create output directory
     if os.path.exists("seq-deposit-output") and not overwrite:
         raise ValueError("seq-deposit-output already exists use --overwrite")
@@ -118,7 +119,6 @@ def log_constructs(constructs):
     :param constructs: the new constructs
     :return: None
     """
-    log = get_logger("log_constructs")
     log.info("Add seq-deposit-output/constructs.csv to sequences.gsheet on all sheet")
     with open("seq-deposit-output/constructs.csv", "w") as f:
         f.write(constructs[0].to_csv_header() + "\n")
@@ -132,7 +132,6 @@ def log_primers(primers):
     :param primers: the new primers
     :return: None
     """
-    log = get_logger("log_primers")
     log.info("seq-deposit-output/primers.csv to the primers.gsheet on oligo sheet")
     with open("seq-deposit-output/primers.csv", "w") as f:
         f.write("name,code,c_code,useable,a_temp,sequence,type\n")
@@ -163,7 +162,6 @@ def opools(csvs, ignore_missing_t7, dry_run, overwrite):
     setup(ignore_missing_t7, dry_run, overwrite)
     params = get_params()
     last_code, _ = get_last_codes(params)
-    log = get_logger("opools")
     constructs = []
     codes = []
     for csv in csvs:
@@ -203,7 +201,6 @@ def assembly(construct_csv, primer_csv, ignore_missing_t7, dry_run, overwrite):
     last_code, last_primer_code = get_last_codes(params)
     df_constructs = pd.read_csv(construct_csv)
     df_primers = pd.read_csv(primer_csv)
-    log = get_logger("assembly")
     log.info("processing %s it has %d sequences", construct_csv, len(df_constructs))
     constructs = []
     p_codes = {}
@@ -260,6 +257,27 @@ def set_deposit_path(path):
     path = os.path.join(os.path.dirname(__file__), "resources", "params.yml")
     with open(path, "w", encoding="utf-8") as f:
         yaml.dump(params, f, default_flow_style=False, allow_unicode=True)
+
+
+@cli.command(help="update libraries")
+@click.argument("construct_csv")
+@click.argument("csvs", nargs=-1)
+def update_libraries(construct_csv, csvs):
+    params = get_params()
+    df_construct = pd.read_csv(construct_csv)
+    for i, row in df_construct.iterrows():
+        name = row["name"]
+        current_csv = None
+        for csv in csvs:
+            if name in csv:
+                current_csv = csv
+                break
+        df = pd.read_csv(current_csv)
+        log.info("processing %s it has %d sequences", csv, len(df))
+        if not has_t7_promoter(df):
+            raise ValueError(f"no t7 promoter found in sequences in {csv}")
+        code = row["code"]
+        deposit_files(df, code, params["deposit_path"], False, False)
 
 
 if __name__ == "__main__":
