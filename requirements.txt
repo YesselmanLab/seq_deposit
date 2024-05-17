@@ -5,3 +5,4 @@ pandas
 wget
 # tools from the lab
 rna_seq_tools
+gsheets @ git+https://github.com/YesselmanLab/gsheets

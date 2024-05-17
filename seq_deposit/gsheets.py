@@ -14,6 +14,7 @@ from seq_tools import to_dna, get_length, trim
 
 log = get_logger("GSHEETS")
 
+
 @dataclass(order=True)
 class ConstructEntry:
     """
@@ -218,8 +219,8 @@ def get_last_codes(params):
     log = get_logger("get_last_codes")
     df_seqs = fetch_sequence_gsheet(params)
     df_primers = fetch_primers_gsheet(params)
-    last_code = df_seqs.iloc[-1]["code"]
-    last_primer_code = df_primers.iloc[-1]["code"]
+    last_code = df_seqs["code"].loc[df_seqs["code"].last_valid_index()]
+    last_primer_code = df_primers["code"].loc[df_primers["code"].last_valid_index()]
     log.info("last construct code on sheet: %s", last_code)
     log.info("last primer code on sheet: %s", last_primer_code)
     return last_code, last_primer_code

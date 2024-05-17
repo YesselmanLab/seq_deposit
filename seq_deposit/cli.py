@@ -11,58 +11,46 @@ from pathlib import Path
 
 from seq_tools import has_t7_promoter
 
-from seq_deposit.logger import setup_applevel_logger, get_logger
+from seq_deposit.logger import setup_logging, get_logger
 from seq_deposit.deposit import deposit_files
 
 from seq_deposit.gsheets import (
     get_construct_entry,
     get_last_codes,
+    fetch_primers_gsheet,
+    fetch_sequence_gsheet,
 )
+
+from gsheets.sheet import get_next_code
 
 
 # helper functions ############################################################
 
-log = get_logger("cli")
+log = get_logger(__name__)
 
 
-def setup(ignore_missing_t7, dry_run, overwrite):
+def setup(ignore_missing_t7: bool, overwrite: bool) -> None:
     """
-    setup function
-    :return: None
+    Set up the necessary configurations for seq-deposit.
+
+    Args:
+        ignore_missing_t7 (bool): Flag indicating whether to ignore missing t7 promoter.
+        overwrite (bool): Flag indicating whether to overwrite existing output directory.
+
+    Returns:
+        None
     """
     # setup logger
-    setup_applevel_logger()
+    setup_logging()
     # create output directory
     if os.path.exists("seq-deposit-output") and not overwrite:
-        raise ValueError("seq-deposit-output already exists use --overwrite")
+        log.error("seq-deposit-output already exists use --overwrite")
+        exit(1)
     log.info("outputs will be written in seq-deposit-output")
     if not os.path.exists("seq-deposit-output"):
         os.makedirs("seq-deposit-output")
     if ignore_missing_t7:
         log.warning("ignore missing t7 promoter. This is not recommended!!")
-    if dry_run:
-        log.warning("dry run. No files will be deposited. Just for testing")
-
-
-def get_next_code(code: str) -> str:
-    """
-    generates the next construct code
-    :param code: the previous code
-    :return: next construct code
-    """
-    order = "0123456789ABCDEFGHIJKLMNPQRSTUVWXYZ"
-    comps = list(code)
-    pos = len(comps) - 1
-    while pos > 1:
-        order_pos = order.index(comps[pos])
-        if order_pos == len(order) - 1:
-            pos -= 1
-            continue
-        comps[pos] = order[order_pos + 1]
-        for i in range(pos + 1, len(comps)):
-            comps[i] = "1"
-        break
-    return "".join(comps)
 
 
 def get_params():
@@ -278,6 +266,15 @@ def update_libraries(construct_csv, csvs):
             raise ValueError(f"no t7 promoter found in sequences in {csv}")
         code = row["code"]
         deposit_files(df, code, params["deposit_path"], False, False)
+
+
+@cli.command(help="get last code")
+def get_last_code():
+    params = get_params()
+    df_seqs = fetch_sequence_gsheet(params)
+    df_primers = fetch_primers_gsheet(params)
+    print(df_seqs.iloc[-1])
+    print(df_primers.iloc[-1])
 
 
 if __name__ == "__main__":
