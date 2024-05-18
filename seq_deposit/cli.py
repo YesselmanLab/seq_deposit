@@ -8,8 +8,7 @@ import click
 import pandas as pd
 import yaml
 from pathlib import Path
-
-from seq_tools import has_t7_promoter
+from typing import List
 
 from seq_deposit.logger import setup_logging, get_logger
 from seq_deposit.deposit import deposit_files
@@ -17,16 +16,14 @@ from seq_deposit.deposit import deposit_files
 from seq_deposit.gsheets import (
     get_construct_entry,
     get_last_codes,
-    fetch_primers_gsheet,
-    fetch_sequence_gsheet,
 )
 
 from gsheets.sheet import get_next_code
 
+log = get_logger(__name__)
+
 
 # helper functions ############################################################
-
-log = get_logger(__name__)
 
 
 def setup(ignore_missing_t7: bool, overwrite: bool) -> None:
@@ -51,19 +48,6 @@ def setup(ignore_missing_t7: bool, overwrite: bool) -> None:
         os.makedirs("seq-deposit-output")
     if ignore_missing_t7:
         log.warning("ignore missing t7 promoter. This is not recommended!!")
-
-
-def get_params():
-    """
-    load parameters from yaml file
-    :return:
-    """
-    # get path relative to this file + resources/params.yaml
-    path = os.path.join(os.path.dirname(__file__), "resources", "params.yml")
-    with open(path, "r", encoding="utf-8") as f:
-        params = yaml.safe_load(f)
-    params["deposit_path"] = os.path.abspath(params["deposit_path"])
-    return params
 
 
 # logging #####################################################################
@@ -139,34 +123,50 @@ def cli():
 
 @cli.command(help="generate required files for opools")
 @click.option("--ignore-missing-t7", is_flag=True, help="ignore t7 promoter")
-@click.option("--dry-run", is_flag=True, help="do not write any files")
+@click.option("--ignore-missing-rt-seq", is_flag=True, help="ignore rt seq")
 @click.option("--overwrite", is_flag=True, help="overwrite existing files")
+@click.option(
+    "--ntype", default="DNA", help="type of nucleic acid", allowed=["DNA", "RNA"]
+)
+@click.option("--t7-seq", default="TTCTAATACGACTCACTATA", help="t7 promoter sequence")
 @click.argument("csvs", nargs=-1)
-def opools(csvs, ignore_missing_t7, dry_run, overwrite):
+def opools(
+    csvs: List[str],
+    ntype: str,
+    ignore_missing_t7: bool,
+    ignore_missing_rt_seq: bool,
+    t7_seq: str,
+    overwrite: bool,
+) -> None:
     """
-    generate required files for opools
-    :param csvs: list of csv files
+    Generate required files for opools.
+
+    Args:
+        csvs (List[str]): List of CSV file paths.
+        ignore_missing_t7 (bool): Flag to ignore missing t7 promoter.
+        ignore_missing_rt_seq (bool): Flag to ignore rt seq.
+        t7_seq (str): T7 promoter sequence.
+        overwrite (bool): Flag to overwrite existing files.
     """
-    setup(ignore_missing_t7, dry_run, overwrite)
-    params = get_params()
-    last_code, _ = get_last_codes(params)
+    setup(ignore_missing_t7, overwrite)
+    last_code, _ = get_last_codes()
     constructs = []
     codes = []
     for csv in csvs:
-        df = pd.read_csv(csv)
-        log.info("processing %s it has %d sequences", csv, len(df))
-        if not has_t7_promoter(df):
-            raise ValueError(f"no t7 promoter found in sequences in {csv}")
+        if ntype == "DNA":
+            df_dna = pd.read_csv(csv)
+
+            pass
+        log.info("processing %s it has %d sequences", csv, len(df_dna))
+        exit()
         code = get_next_code(last_code)
-        deposit_files(df, code, params["deposit_path"], dry_run, ignore_missing_t7)
         centry = get_construct_entry(df, Path(csv).stem, code, ignore_missing_t7)
         last_code = code
-        constructs.append(centry)
-        codes.append(code)
-    log_constructs(constructs)
-    if not dry_run:
-        log.info("updating log csv ")
-        log_new_libaries(params, csvs, codes)
+
+    # log_constructs(constructs)
+    # if not dry_run:
+    #    log.info("updating log csv ")
+    #    log_new_libaries(params, csvs, codes)
 
 
 @cli.command(help="generate required files for primer assemblies")
@@ -275,6 +275,13 @@ def get_last_code():
     df_primers = fetch_primers_gsheet(params)
     print(df_seqs.iloc[-1])
     print(df_primers.iloc[-1])
+
+
+# TODO takes a seq-desposit directory and actually transfers files!
+@cli.command()
+def deposit():
+    # deposit_files(df, code, params["deposit_path"], dry_run, ignore_missing_t7)
+    pass
 
 
 if __name__ == "__main__":

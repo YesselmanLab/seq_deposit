@@ -1,106 +1,33 @@
 """
 handles processing of google sheets data
 """
+
 import os
 import pandas as pd
 from dataclasses import dataclass
-import wget
+from typing import Dict, Any
+
+from seq_tools import to_dna, get_length, trim, has_5p_sequence
+import vienna
+
+from gsheets.sheet import get_sequence_sheet, get_oligo_sheet
 
 from seq_deposit.logger import get_logger
 from seq_deposit.settings import LIB_PATH
 
-import vienna
-from seq_tools import to_dna, get_length, trim
 
-log = get_logger("GSHEETS")
-
-
-@dataclass(order=True)
-class ConstructEntry:
-    """
-    construct entry
-    """
-
-    name: str
-    code: str
-    ctype: str
-    arrived: str = "NO"
-    usuable: str = "UNK"
-    size: str = -1
-    dna_len: str = -1
-    dna_sequence: str = "LIBRARY"
-    rna_len: str = -1
-    rna_sequence: str = "LIBRARY"
-    rna_structure: str = "LIBRARY"
-    fwd_p: str = "NONE"
-    rev_p: str = "NONE"
-    rt_p: str = "RTB"
-    seq_fwd_p: str = "P000R"
-    seq_rev_p: str = "P000Y"
-    project: str = ""
-    comment: str = ""
-
-    def to_csv_str(self):
-        """
-        converts to csv string
-        """
-        return ",".join(
-            str(x)
-            for x in [
-                self.name,
-                self.code,
-                self.ctype,
-                self.arrived,
-                self.usuable,
-                self.size,
-                self.dna_len,
-                self.dna_sequence,
-                self.rna_len,
-                self.rna_sequence,
-                self.rna_structure,
-                self.fwd_p,
-                self.rev_p,
-                self.rt_p,
-                self.seq_fwd_p,
-                self.seq_rev_p,
-                self.project,
-                self.comment,
-            ]
-        )
-
-    def to_csv_header(self):
-        """
-        converts to csv string
-        """
-        return ",".join(
-            str(x)
-            for x in [
-                "name",
-                "code",
-                "type",
-                "arrived",
-                "usable",
-                "size",
-                "dna_len",
-                "dna_sequence",
-                "rna_len",
-                "rna_sequence",
-                "rna_structure",
-                "fwd_p",
-                "rev_p",
-                "rt_p",
-                "seq_fwd_p",
-                "seq_rev_p",
-                "project",
-                "comment",
-            ]
-        )
+log = get_logger(__name__)
 
 
 def get_seq_fwd_primer_code(df: pd.DataFrame) -> str:
     """
-    gets the sequence forward primer code
-    :param df: the dataframe with sequences
+    Returns the code for the forward primer based on the given DataFrame.
+
+    Args:
+        df (pd.DataFrame): The DataFrame containing the sequences.
+
+    Returns:
+        str: The code for the forward primer, or an empty string if no match is found.
     """
     df = df.copy()
     df = to_dna(df)
@@ -111,6 +38,80 @@ def get_seq_fwd_primer_code(df: pd.DataFrame) -> str:
         if all(df["sequence"].str.startswith(row["sequence"])):  # type: ignore
             return row["code"]
     return ""
+
+
+def get_construct_entry(name, code, ctype, size):
+    """
+    Create a dictionary representing a construct entry.
+
+    Args:
+        name (str): The name of the construct.
+        code (str): The code of the construct.
+        ctype (str): The type of the construct.
+        size (int): The size of the construct.
+
+    Returns:
+        dict: A dictionary representing the construct entry with default values for other fields.
+    """
+    return {
+        "name": name,
+        "code": code,
+        "type": ctype,
+        "size": size,
+        "arrived": "NO",
+        "usuable": "UNK",
+        "size": -1,
+        "dna_len": -1,
+        "dna_sequence": "LIBRARY",
+        "rna_len": -1,
+        "rna_sequence": "LIBRARY",
+        "rna_structure": "LIBRARY",
+        "fwd_p": "NONE",
+        "rev_p": "NONE",
+        "rt_p": "RTB",
+        "seq_fwd_p": "P000R",
+        "seq_rev_p": "P000Y",
+        "project": "",
+        "comment": "",
+    }
+
+
+def generate_rna_dataframe(df, ignore_missing_t7):
+    pass
+
+
+def get_construct_entry_from_dna(
+    df: pd.DataFrame,
+    name: str,
+    ctype: str,
+    code: str,
+    no_t7: bool = False,
+    t7_seq="TTCTAATACGACTCACTATA",
+) -> Dict[str, Any]:
+    construct_info = get_construct_entry(name, ctype, code, len(df))
+    df = df.copy()
+    df = get_length(df)
+    if len(df) == 1:
+        dna_seq = df.iloc[0]["sequence"]
+        construct_info["dna_sequence"] = dna_seq
+        if not no_t7:  # need to remove t7 promoter
+            if not dna_seq.startswith(t7_seq):
+                log.error(f"{name} does not contain a t7 promoter")
+                exit(1)
+            dna_seq = dna_seq[20:]
+        construct_info["rna_sequence"] = dna_seq.replace("T", "U")
+    else:
+        construct_info["fwd_p"] = "P001E"
+        construct_info["rev_p"] = "P001F"
+    construct_info["dna_len"] = df["length"].mean()
+    if not no_t7:
+        if not dna_seq.startswith(t7_seq):
+            log.error(f"{name} does not contain a t7 promoter")
+            exit(1)
+        construct_info["rna_len"] = construct_info["dna_len"] - 20
+        df = trim(df, 20, 0)
+    else:
+        construct_info["rna_len"] = construct_info["dna_len"]
 
 
 def get_construct_entry(
@@ -133,7 +134,6 @@ def get_construct_entry(
         else:
             return "AGILENT"
 
-    log = get_logger("get_construct_entry")
     df = df.copy()
     df = get_length(df)
     centry = ConstructEntry(name, code, _assign_ctype(df))
@@ -162,75 +162,15 @@ def get_construct_entry(
     return centry
 
 
-def fetch_sequence_gsheet(params) -> pd.DataFrame:
-    """
-    fetches the sequence google sheet
-    :param params: module params
-    :return: dataframe of sequence sheet
-    """
-    gsheet_path = params["sequence_gsheet_url"]
-    wget.download(gsheet_path, "temp.csv")
-    df = pd.read_csv("temp.csv")
-    os.remove("temp.csv")
-    cols = (
-        "name,code,type,arrived,usuable,size,dna_len,dna_sequence,rna_len,"
-        "rna_sequence,rna_structure,fwd_p,rev_p,rt_p,seq_fwd_p,project,"
-        "comment".split(",")
-    )
-    df = df[cols]
-    path = os.path.join(LIB_PATH, "resources", "all.csv")
-    df.to_csv(path, index=False)
-    return df
-
-
-def fetch_primers_gsheet(params) -> pd.DataFrame:
-    """
-    fetches the primer google sheet
-    :param params: module params
-    :return: dataframe of primer sheet
-    """
-    gsheet_path = params["primer_gsheet_url"]
-    wget.download(gsheet_path, "temp.csv")
-    cols = [
-        "name",
-        "code",
-        "c_code",
-        "useable",
-        "a_temp",
-        "sequence",
-        "type",
-        "",
-    ]
-    df = pd.read_csv("temp.csv", header=None, names=cols, skiprows=1)
-    # remove last column that has nothing
-    df = df.iloc[:, :-1]
-    df.to_csv("temp.csv", index=False)
-    os.remove("temp.csv")
-    path = os.path.join(LIB_PATH, "resources", "primer.csv")
-    df.to_csv(path, index=False)
-    return df
-
-
-def get_last_codes(params):
+def get_last_codes():
     """
     get the last codes from the google sheet
     :param params: module parameters
     """
-    log = get_logger("get_last_codes")
-    df_seqs = fetch_sequence_gsheet(params)
-    df_primers = fetch_primers_gsheet(params)
+    df_seqs = get_sequence_sheet()
+    df_primers = get_oligo_sheet()
     last_code = df_seqs["code"].loc[df_seqs["code"].last_valid_index()]
     last_primer_code = df_primers["code"].loc[df_primers["code"].last_valid_index()]
     log.info("last construct code on sheet: %s", last_code)
     log.info("last primer code on sheet: %s", last_primer_code)
     return last_code, last_primer_code
-
-
-# TODO finish implementing
-def get_p5_valid_sequences(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    gets the p5 sequence
-    :param df: the dataframe with sequences
-    """
-    df = df[df["type"] == "SEQ_REV"]
-    return df
