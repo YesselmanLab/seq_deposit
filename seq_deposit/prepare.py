@@ -1,5 +1,7 @@
 import os
 import pandas as pd
+import multiprocessing
+from typing import List
 
 from seq_tools import (
     get_length,
@@ -10,6 +12,7 @@ from seq_tools import (
     to_fasta,
     trim,
     transcribe,
+    has_5p_sequence,
 )
 
 from seq_deposit.logger import get_logger
@@ -39,6 +42,44 @@ def check_rt_seq(df: pd.DataFrame) -> str:
     return None
 
 
+def split_dataframe(df, chunk_size=10000) -> List[pd.DataFrame]:
+    """
+    Splits a dataframe into smaller chunks.
+
+    Args:
+        df (pandas.DataFrame): The dataframe to be split.
+        chunk_size (int, optional): The size of each chunk. Defaults to 10000.
+
+    Returns:
+        list: A list of dataframes, each representing a chunk of the original dataframe.
+    """
+    chunks = list()
+    num_chunks = len(df) // chunk_size + 1
+    for i in range(num_chunks):
+        chunks.append(df[i * chunk_size : (i + 1) * chunk_size])
+    return chunks
+
+
+def run_func_in_parallel(
+    func, df: pd.DataFrame, p: multiprocessing.Pool
+) -> pd.DataFrame:
+    """
+    Runs a given function in parallel on a DataFrame using a multiprocessing Pool.
+
+    Args:
+        func: The function to be executed in parallel.
+        df (pd.DataFrame): The DataFrame to be processed.
+        p (multiprocessing.Pool): The multiprocessing Pool object.
+
+    Returns:
+        pd.DataFrame: The concatenated DataFrame after executing the function in parallel.
+    """
+    inputs = split_dataframe(df, int(len(df) / len(p._pool)) + 1)
+    dfs = p.starmap(func, zip(inputs))
+    df = pd.concat(dfs)
+    return df
+
+
 def generate_dna_dataframe(
     df: pd.DataFrame,
     ntype: str,
@@ -49,7 +90,15 @@ def generate_dna_dataframe(
     df_dna = df.copy()
     if "name" not in df_dna.columns:
         df_dna = get_default_names(df_dna)
-    df_dna = to_dna(df_dna)
+    if ntype == "DNA":
+        df_dna = to_dna(df_dna)
+        if not ignore_missing_t7:
+            if not has_5p_sequence(df_dna, t7_seq):
+                log.error("Missing T7 promoter sequence")
+                exit()
+    elif ntype == "RNA":
+        pass
+
     df_dna = df_dna[["name", "sequence"]]
     df_dna = get_length(df_dna)
     df_dna = get_molecular_weight(df_dna, "DNA", True)
