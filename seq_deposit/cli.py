@@ -7,18 +7,23 @@ import shutil
 import click
 import pandas as pd
 import yaml
+import sys
 from pathlib import Path
 from typing import List
 
+from seq_tools import to_fasta, to_dna
+
+from gsheets.sheet import get_next_code, get_sequence_sheet, get_oligo_sheet
+
 from seq_deposit.logger import setup_logging, get_logger
 from seq_deposit.deposit import deposit_files
+from seq_deposit.prepare import generate_dna_dataframe, generate_rna_dataframe
 
 from seq_deposit.gsheets import (
-    get_construct_entry,
     get_last_codes,
 )
+from seq_deposit.construct_info import get_construct_entry
 
-from gsheets.sheet import get_next_code
 
 log = get_logger(__name__)
 
@@ -26,12 +31,16 @@ log = get_logger(__name__)
 # helper functions ############################################################
 
 
-def setup(ignore_missing_t7: bool, overwrite: bool) -> None:
+def setup(
+    ignore_missing_t7: bool, ignore_missing_rt_seq: bool, t7_seq: str, overwrite: bool
+) -> None:
     """
-    Set up the necessary configurations for seq-deposit.
+    Set up the necessary configurations and directories for seq-deposit.
 
     Args:
-        ignore_missing_t7 (bool): Flag indicating whether to ignore missing t7 promoter.
+        ignore_missing_t7 (bool): Flag indicating whether to ignore missing T7 promoter sequence.
+        ignore_missing_rt_seq (bool): Flag indicating whether to ignore missing RT sequence.
+        t7_seq (str): The T7 promoter sequence.
         overwrite (bool): Flag indicating whether to overwrite existing output directory.
 
     Returns:
@@ -46,8 +55,17 @@ def setup(ignore_missing_t7: bool, overwrite: bool) -> None:
     log.info("outputs will be written in seq-deposit-output")
     if not os.path.exists("seq-deposit-output"):
         os.makedirs("seq-deposit-output")
+    log.info("ran at commandline as: ")
+    log.info(" ".join(sys.argv))
+    os.makedirs("seq-deposit-output/dna", exist_ok=True)
+    os.makedirs("seq-deposit-output/rna", exist_ok=True)
+    os.makedirs("seq-deposit-output/fastas", exist_ok=True)
     if ignore_missing_t7:
         log.warning("ignore missing t7 promoter. This is not recommended!!")
+    else:
+        log.info("t7 promoter sequence: %s", t7_seq)
+    if ignore_missing_rt_seq:
+        log.warning("ignore missing rt seq. This is not recommended!!")
 
 
 # logging #####################################################################
@@ -119,16 +137,16 @@ def cli():
     """
     command line interface for seq_deposit script
     """
+    pass
 
 
 @cli.command(help="generate required files for opools")
 @click.option("--ignore-missing-t7", is_flag=True, help="ignore t7 promoter")
 @click.option("--ignore-missing-rt-seq", is_flag=True, help="ignore rt seq")
 @click.option("--overwrite", is_flag=True, help="overwrite existing files")
-@click.option(
-    "--ntype", default="DNA", help="type of nucleic acid", allowed=["DNA", "RNA"]
-)
+@click.option("--ntype", default="DNA", help="type of nucleic acid")
 @click.option("--t7-seq", default="TTCTAATACGACTCACTATA", help="t7 promoter sequence")
+@click.option("--threads", default=1, help="number of threads to use")
 @click.argument("csvs", nargs=-1)
 def opools(
     csvs: List[str],
@@ -136,6 +154,7 @@ def opools(
     ignore_missing_t7: bool,
     ignore_missing_rt_seq: bool,
     t7_seq: str,
+    threads: int,
     overwrite: bool,
 ) -> None:
     """
@@ -143,50 +162,68 @@ def opools(
 
     Args:
         csvs (List[str]): List of CSV file paths.
-        ignore_missing_t7 (bool): Flag to ignore missing t7 promoter.
-        ignore_missing_rt_seq (bool): Flag to ignore rt seq.
-        t7_seq (str): T7 promoter sequence.
-        overwrite (bool): Flag to overwrite existing files.
+        ntype (str): Type of nucleic acid. Default is "DNA".
+        ignore_missing_t7 (bool): Flag to ignore t7 promoter. Default is False.
+        ignore_missing_rt_seq (bool): Flag to ignore rt seq. Default is False.
+        t7_seq (str): t7 promoter sequence. Default is "TTCTAATACGACTCACTATA".
+        threads (int): Number of threads to use. Default is 1.
+        overwrite (bool): Flag to overwrite existing files. Default is False.
+
+    Returns:
+        None
     """
-    setup(ignore_missing_t7, overwrite)
+    setup(ignore_missing_t7, ignore_missing_rt_seq, t7_seq, overwrite)
+    log.info("processing %d csvs", len(csvs))
+    log.info("ntype: %s", ntype)
     last_code, _ = get_last_codes()
     constructs = []
-    codes = []
+    df_seqs = get_sequence_sheet()
     for csv in csvs:
         if ntype == "DNA":
             df_dna = pd.read_csv(csv)
-
-            pass
+            df_rna = generate_rna_dataframe(
+                df_dna, ntype, ignore_missing_t7, ignore_missing_rt_seq, t7_seq, threads
+            )
+        else:
+            df_rna = pd.read_csv(csv)
+            df_dna = generate_dna_dataframe(
+                df_rna, ntype, ignore_missing_t7, ignore_missing_rt_seq, t7_seq
+            )
+        ctype = "OPOOL"
+        if len(df_dna) > 100:
+            ctype = "AGILENT"
         log.info("processing %s it has %d sequences", csv, len(df_dna))
-        exit()
         code = get_next_code(last_code)
-        centry = get_construct_entry(df, Path(csv).stem, code, ignore_missing_t7)
+        fname = Path(csv).stem
+        construct_entry = get_construct_entry(df_dna, df_rna, fname, ctype, code)
+        constructs.append(construct_entry)
+        df_dna.to_csv(f"seq-deposit-output/dna/{code}.csv", index=False)
+        df_rna.to_csv(f"seq-deposit-output/rna/{code}.csv", index=False)
+        df_fasta = df_rna[["name", "sequence"]]
+        df_fasta = to_dna(df_fasta)
+        to_fasta(df_fasta, f"seq-deposit-output/fastas/{code}.fasta")
         last_code = code
-
-    # log_constructs(constructs)
-    # if not dry_run:
-    #    log.info("updating log csv ")
-    #    log_new_libaries(params, csvs, codes)
+    df_constructs = pd.DataFrame(constructs, columns=df_seqs.columns)
+    df_constructs.to_csv("seq-deposit-output/constructs.csv", index=False)
 
 
 @cli.command(help="generate required files for primer assemblies")
 @click.argument("construct_csv")
 @click.argument("primer_csv")
 @click.option("--ignore-missing-t7", is_flag=True, help="ignore t7 promoter")
-@click.option("--dry-run", is_flag=True, help="do not write any files")
+@click.option("--ignore-missing-rt-seq", is_flag=True, help="ignore rt seq")
+@click.option("--t7-seq", default="TTCTAATACGACTCACTATA", help="t7 promoter sequence")
 @click.option("--overwrite", is_flag=True, help="overwrite existing files")
-def assembly(construct_csv, primer_csv, ignore_missing_t7, dry_run, overwrite):
-    """
-    generate required files for primer assemblies
-    :param construct_csv: path to construct csv
-    :param primer_csv: path to primer csv
-    :param ignore_missing_t7: ignore missing t7 promoter
-    :param dry_run: do not write any files
-    :param overwrite: overwrite existing files
-    """
-    setup(ignore_missing_t7, dry_run, overwrite)
-    params = get_params()
-    last_code, last_primer_code = get_last_codes(params)
+def assembly(
+    construct_csv,
+    primer_csv,
+    ignore_missing_t7,
+    ignore_missing_rt_seq,
+    t7_seq,
+    overwrite,
+):
+    setup(ignore_missing_t7, ignore_missing_rt_seq, t7_seq, overwrite)
+    last_code, last_primer_code = get_last_codes()
     df_constructs = pd.read_csv(construct_csv)
     df_primers = pd.read_csv(primer_csv)
     log.info("processing %s it has %d sequences", construct_csv, len(df_constructs))
@@ -231,22 +268,13 @@ def assembly(construct_csv, primer_csv, ignore_missing_t7, dry_run, overwrite):
         log_new_libaries(params, [construct_csv], [";".join(codes)])
 
 
-@cli.command(help="update deposit path")
-@click.argument("path")
-def set_deposit_path(path):
-    """
-    update deposit path
-    :param path: path to deposit
-    """
-    params = get_params()
-    if not os.path.exists(path):
-        raise ValueError(f"path {path} does not exist")
-    params["deposit_path"] = path
-    path = os.path.join(os.path.dirname(__file__), "resources", "params.yml")
-    with open(path, "w", encoding="utf-8") as f:
-        yaml.dump(params, f, default_flow_style=False, allow_unicode=True)
+# TODO looks at a finalized directory and preps files from that like a final/ directory
+@cli.command()
+def directory():
+    pass
 
 
+# TODO refactor this should supply either an csv and code
 @cli.command(help="update libraries")
 @click.argument("construct_csv")
 @click.argument("csvs", nargs=-1)
@@ -279,9 +307,24 @@ def get_last_code():
 
 # TODO takes a seq-desposit directory and actually transfers files!
 @cli.command()
-def deposit():
+@click.option("--deposit-path", default=None, help="deposit path")
+@click.option("--force", is_flag=True, help="force copy of files")
+def deposit(deposit_path, force):
+    # check if the deposit path exists if not use supplied option
     # deposit_files(df, code, params["deposit_path"], dry_run, ignore_missing_t7)
-    pass
+    setup_logging()
+    output = input(
+        "are you sure you want to deposit all files (i.e. did you check they are corect)? [y/n]"
+    )
+    if output == "y":
+        print("depositing files")
+    else:
+        return
+    if not os.path.exists("seq-deposit-output"):
+        log.error("seq-deposit-output does not exist")
+        return
+    if deposit_path is None:
+        pass
 
 
 if __name__ == "__main__":

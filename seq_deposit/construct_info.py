@@ -40,7 +40,7 @@ def get_seq_fwd_primer_code(df: pd.DataFrame) -> str:
     return ""
 
 
-def get_construct_entry(name, code, ctype, size):
+def get_default_construct_entry(name, code, ctype, size):
     """
     Create a dictionary representing a construct entry.
 
@@ -60,7 +60,6 @@ def get_construct_entry(name, code, ctype, size):
         "size": size,
         "arrived": "NO",
         "usuable": "UNK",
-        "size": -1,
         "dna_len": -1,
         "dna_sequence": "LIBRARY",
         "rna_len": -1,
@@ -71,88 +70,47 @@ def get_construct_entry(name, code, ctype, size):
         "rt_p": "RTB",
         "seq_fwd_p": "P000R",
         "seq_rev_p": "P000Y",
+        "dir": "",
+        "designed_by": "",
         "project": "",
         "comment": "",
     }
 
 
-def generate_rna_dataframe(df, ignore_missing_t7):
-    pass
-
-
-def get_construct_entry_from_dna(
-    df: pd.DataFrame,
+def get_construct_entry(
+    df_dna: pd.DataFrame,
+    df_rna: pd.DataFrame,
     name: str,
     ctype: str,
     code: str,
-    no_t7: bool = False,
-    t7_seq="TTCTAATACGACTCACTATA",
 ) -> Dict[str, Any]:
-    construct_info = get_construct_entry(name, ctype, code, len(df))
-    df = df.copy()
-    df = get_length(df)
-    if len(df) == 1:
-        dna_seq = df.iloc[0]["sequence"]
-        construct_info["dna_sequence"] = dna_seq
-        if not no_t7:  # need to remove t7 promoter
-            if not dna_seq.startswith(t7_seq):
-                log.error(f"{name} does not contain a t7 promoter")
-                exit(1)
-            dna_seq = dna_seq[20:]
-        construct_info["rna_sequence"] = dna_seq.replace("T", "U")
+    """
+    Get the construct entry for a given DNA and RNA DataFrame.
+
+    Args:
+        df_dna (pd.DataFrame): DataFrame containing DNA sequences.
+        df_rna (pd.DataFrame): DataFrame containing RNA sequences.
+        name (str): Name of the construct.
+        ctype (str): Type of the construct.
+        code (str): Code of the construct.
+
+    Returns:
+        Dict[str, Any]: Construct information dictionary.
+
+    """
+    construct_info = get_default_construct_entry(name, ctype, code, len(df_dna))
+    df_dna = get_length(df_dna)
+    df_rna = get_length(df_rna)
+    if len(df_dna) == 1:
+        construct_info["dna_sequence"] = df_dna.iloc[0]["sequence"]
+        construct_info["rna_sequence"] = df_rna.iloc[0]["sequence"]
     else:
         construct_info["fwd_p"] = "P001E"
         construct_info["rev_p"] = "P001F"
-    construct_info["dna_len"] = df["length"].mean()
-    if not no_t7:
-        if not dna_seq.startswith(t7_seq):
-            log.error(f"{name} does not contain a t7 promoter")
-            exit(1)
-        construct_info["rna_len"] = construct_info["dna_len"] - 20
-        df = trim(df, 20, 0)
-    else:
-        construct_info["rna_len"] = construct_info["dna_len"]
-
-
-"""
-def get_construct_entry(
-    df: pd.DataFrame, name: str, code: str, no_t7: bool = False
-) -> ConstructEntry:
-    def _assign_ctype(df: pd.DataFrame) -> str:
-        if len(df) == 1:
-            return "ASSEMBLY"
-        elif len(df) < 100:
-            return "OPOOL"
-        else:
-            return "AGILENT"
-
-    df = df.copy()
-    df = get_length(df)
-    centry = ConstructEntry(name, code, _assign_ctype(df))
-    centry.size = len(df)
-    if centry.ctype == "ASSEMBLY":
-        centry.dna_len = df.iloc[0]["length"]
-        centry.dna_sequence = df.iloc[0]["sequence"]
-        if no_t7:
-            centry.rna_sequence = df.iloc[0]["sequence"].replace("T", "U")
-        else:
-            centry.rna_sequence = df.iloc[0]["sequence"][20:].replace("T", "U")
-        centry.rna_len = len(centry.rna_sequence)
-        centry.rna_structure = vienna.folded_structure(centry.rna_sequence)
-    else:
-        centry.rna_len = df["length"].mean()
-        centry.dna_len = df["length"].mean() + 20
-        if no_t7:
-            centry.dna_len -= 20
-        centry.fwd_p = "P001E"
-        centry.rev_p = "P001F"
-    if not no_t7:
-        df = trim(df, 20, 0)
-    centry.seq_rev_p = get_seq_fwd_primer_code(df)
-    if centry.seq_rev_p == "":
-        log.warning(f"forward primer cannot be determined for {code}")
-    return centry
-"""
+    construct_info["dna_len"] = round(df_dna["length"].mean())
+    construct_info["rna_len"] = round(df_rna["length"].mean())
+    construct_info["seq_rev_p"] = get_seq_fwd_primer_code(df_rna)
+    return construct_info
 
 
 def get_last_codes():
