@@ -98,7 +98,7 @@ def get_construct_entry(
         Dict[str, Any]: Construct information dictionary.
 
     """
-    construct_info = get_default_construct_entry(name, ctype, code, len(df_dna))
+    construct_info = get_default_construct_entry(name, code, ctype, len(df_dna))
     df_dna = get_length(df_dna)
     df_rna = get_length(df_rna)
     if len(df_dna) == 1:

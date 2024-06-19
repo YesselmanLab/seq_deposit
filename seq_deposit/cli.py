@@ -4,13 +4,13 @@ command line interface for seq_deposit script
 
 import os
 import shutil
-import click
+import cloup
 import pandas as pd
-import yaml
 import sys
 import glob
 from pathlib import Path
 from typing import List
+from tabulate import tabulate
 
 from seq_tools import to_fasta, to_dna
 
@@ -19,14 +19,10 @@ from gsheets.sheet import get_next_code, get_sequence_sheet, get_oligo_sheet
 from seq_deposit.logger import setup_logging, get_logger
 from seq_deposit.deposit import deposit_files, deposit_rna_csv
 from seq_deposit.prepare import generate_dna_dataframe, generate_rna_dataframe
-
-from seq_deposit.gsheets import (
-    get_last_codes,
-)
 from seq_deposit.construct_info import get_construct_entry
 
 
-log = get_logger(__name__)
+log = get_logger("CLI")
 
 
 # helper functions ############################################################
@@ -41,6 +37,18 @@ def get_rna_dataframe_from_row(row, columns):
         inplace=True,
     )
     row_df = generate_rna_dataframe(row_df, "RNA")
+    return row_df
+
+
+def get_dna_dataframe_from_row(row, columns):
+    row_df = pd.DataFrame([row], columns=columns, index=[0])
+    row_df = row_df[["name", "dna_sequence"]]
+    row_df.rename(
+        {"dna_sequence": "sequence"},
+        axis=1,
+        inplace=True,
+    )
+    row_df = generate_dna_dataframe(row_df, "DNA")
     return row_df
 
 
@@ -88,8 +96,25 @@ def validate_rna_csv(row, seq_path):
         return True
 
 
+def validate_dna_csv(row, seq_path):
+    if not os.path.exists(f"{seq_path}/dna/{row['code']}.csv"):
+        log.warning(f"dna csv does not exist for {row['code']}")
+        return False
+    df_rna = pd.read_csv(f"{seq_path}/dna/{row['code']}.csv")
+    if row["type"] == "ASSEMBLY":
+        csv_row = df_rna.iloc[0]
+        if row["dna_sequence"] != csv_row["sequence"]:
+            log.warning(f"dna sequence does not match for {row['code']}")
+            return False
+        return True
+
+
 def setup(
-    ignore_missing_t7: bool, ignore_missing_rt_seq: bool, t7_seq: str, overwrite: bool
+    ignore_missing_t7: bool,
+    ignore_missing_rt_seq: bool,
+    t7_seq: str,
+    rt_seq: str,
+    overwrite: bool,
 ) -> None:
     """
     Set up the necessary configurations and directories for seq-deposit.
@@ -105,6 +130,11 @@ def setup(
     """
     # setup logger
     setup_logging()
+    log.info("setting up seq-deposit")
+    log.info("ignore missing t7: %s", ignore_missing_t7)
+    log.info("ignore missing rt seq: %s", ignore_missing_rt_seq)
+    log.info("t7 seq: %s", t7_seq)
+    log.info("rt seq: %s", rt_seq)
     # create output directory
     if os.path.exists("seq-deposit-output") and not overwrite:
         log.error("seq-deposit-output already exists use --overwrite")
@@ -123,6 +153,25 @@ def setup(
         log.info("t7 promoter sequence: %s", t7_seq)
     if ignore_missing_rt_seq:
         log.warning("ignore missing rt seq. This is not recommended!!")
+
+
+def get_last_codes():
+    """
+    get the last codes from the google sheet
+    :param params: module parameters
+    """
+    log = get_logger("get_last_codes")
+    df_seqs = get_sequence_sheet()
+    df_primers = get_oligo_sheet()
+    last_code = df_seqs["code"].loc[df_seqs["code"].last_valid_index()]
+    last_primer_code = df_primers["code"].loc[df_primers["code"].last_valid_index()]
+    log.info("last construct code on sheet: %s", last_code)
+    log.info("last primer code on sheet: %s", last_primer_code)
+    return last_code, last_primer_code
+
+
+def setup_output_dir(df):
+    pass
 
 
 # logging #####################################################################
@@ -187,9 +236,33 @@ def log_primers(primers):
 
 
 # cli functions ###############################################################
+def common_options():
+    """
+    Returns a Cloup option group with common options.
+
+    Returns:
+        cloup.OptionGroup: A Cloup option group containing the common options.
+
+    Options:
+        --ignore-missing-t7: Ignore the t7 promoter. (default: False)
+        --ignore-missing-rt-seq: Ignore the rt sequence. (default: False)
+        --overwrite: Overwrite existing files. (default: False)
+        --t7-seq: The t7 promoter sequence. (default: "TTCTAATACGACTCACTATA")
+        --rt-seq: The rt sequence. (default: "AAAGAAACAACAACAACAAC")
+    """
+    return cloup.option_group(
+        "common options",
+        cloup.option("--ignore-missing-t7", is_flag=True, help="ignore t7 promoter"),
+        cloup.option("--ignore-missing-rt-seq", is_flag=True, help="ignore rt seq"),
+        cloup.option("--overwrite", is_flag=True, help="overwrite existing files"),
+        cloup.option(
+            "--t7-seq", default="TTCTAATACGACTCACTATA", help="t7 promoter sequence"
+        ),
+        cloup.option("--rt-seq", default="AAAGAAACAACAACAACAAC", help="rt sequence"),
+    )
 
 
-@click.group()
+@cloup.group()
 def cli():
     """
     command line interface for seq_deposit script
@@ -197,14 +270,126 @@ def cli():
     pass
 
 
+@cli.command(help="")
+@common_options()
+def from_final_dir(**kwargs):
+    setup(**kwargs)
+    if os.path.isdir("final"):
+        log.info("final directory exists")
+    else:
+        log.error("final directory does not exist")
+        exit()
+    method = None
+    try:
+        with open("final/METHOD") as f:
+            method = f.read().rstrip()
+    except:
+        pass
+    last_code, last_primer_code = get_last_codes()
+    df_seqs = get_sequence_sheet()
+    df = pd.read_json("final/summary_jsons/without_codes.json")
+    df["primer_codes"] = [[] for _ in range(len(df))]
+    constructs = []
+    primers = []
+    for construct, g in df.groupby("construct"):
+        df_dna = g[["name", "dna_sequence"]].copy()
+        df_dna.rename(columns={"dna_sequence": "sequence"}, inplace=True)
+        df_rna = g[["name", "sequence", "structure", "mfe", "ens_defect"]].copy()
+        # standardize
+        df_dna = generate_dna_dataframe(
+            df_dna,
+            "DNA",
+            kwargs["ignore_missing_t7"],
+            kwargs["ignore_missing_rt_seq"],
+            kwargs["t7_seq"],
+        )
+        df_rna = generate_rna_dataframe(
+            df_rna,
+            "RNA",
+            kwargs["ignore_missing_t7"],
+            kwargs["ignore_missing_rt_seq"],
+            kwargs["t7_seq"],
+        )
+        log.info("processing %s it has %d sequence(s)", construct, len(df_dna))
+        code = get_next_code(last_code)
+        construct_entry = get_construct_entry(df_dna, df_rna, construct, method, code)
+        constructs.append(construct_entry)
+        df_dna.to_csv(f"seq-deposit-output/dna/{code}.csv", index=False)
+        df_rna.to_csv(f"seq-deposit-output/rna/{code}.csv", index=False)
+        df_fasta = df_rna[["name", "sequence"]]
+        df_fasta = to_dna(df_fasta)
+        to_fasta(df_fasta, f"seq-deposit-output/fastas/{code}.fasta")
+        last_code = code
+        if not g.iloc[0]["has_primers"]:
+            continue
+        for i, row in g.iterrows():
+            pcodes = []
+            pos = 1
+            for pname, pseq in zip(row["primer_names"], row["primers"]):
+                pcode = get_next_code(last_primer_code)
+                primers.append(
+                    [pname, pcode, construct, code, "UNK", "N/A", pseq, "ASSEMBLY", pos]
+                )
+                pcodes.append(pcode)
+                last_primer_code = pcode
+                pos += 1
+            df.at[i, "primer_codes"] = pcodes
+    df_primers = pd.DataFrame(
+        primers,
+        columns=[
+            "p_name",
+            "p_code",
+            "construct",
+            "code",
+            "useable",
+            "a_temp",
+            "sequence",
+            "type",
+            "p_num",
+        ],
+    )
+    df_assembly = df_primers[["construct", "code", "p_num", "p_name", "p_code"]]
+    df_assembly.to_csv("seq-deposit-output/assemblies.csv", index=False)
+    df_primers.drop(columns=["p_num", "construct"], inplace=True)
+    df_primers.rename(columns={"p_name": "name", "code": "c_code"}, inplace=True)
+    df_primers.rename(
+        columns={
+            "p_code": "code",
+        },
+        inplace=True,
+    )
+    df_primers = df_primers[
+        ["name", "code", "c_code", "useable", "a_temp", "sequence", "type"]
+    ]
+    df_primers.to_csv("seq-deposit-output/primers.csv", index=False)
+    df_constructs = pd.DataFrame(constructs, columns=df_seqs.columns)
+    log.info(
+        "\n"
+        + tabulate(
+            df_constructs[["name", "code", "type", "size", "dna_len"]],
+            headers="keys",
+            tablefmt="psql",
+        )
+    )
+    df_constructs.to_csv("seq-deposit-output/constructs.csv", index=False)
+
+
+@cli.command(help="generate required files from final directory")
+@cloup.argument("final_dir")
+def finalize(final_dir):
+    """
+    finalize constructs that will be ordered as agilent libraries
+    """
+
+
 @cli.command(help="generate required files for opools")
-@click.option("--ignore-missing-t7", is_flag=True, help="ignore t7 promoter")
-@click.option("--ignore-missing-rt-seq", is_flag=True, help="ignore rt seq")
-@click.option("--overwrite", is_flag=True, help="overwrite existing files")
-@click.option("--ntype", default="DNA", help="type of nucleic acid")
-@click.option("--t7-seq", default="TTCTAATACGACTCACTATA", help="t7 promoter sequence")
-@click.option("--threads", default=1, help="number of threads to use")
-@click.argument("csvs", nargs=-1)
+@cloup.option("--ignore-missing-t7", is_flag=True, help="ignore t7 promoter")
+@cloup.option("--ignore-missing-rt-seq", is_flag=True, help="ignore rt seq")
+@cloup.option("--overwrite", is_flag=True, help="overwrite existing files")
+@cloup.option("--ntype", default="DNA", help="type of nucleic acid")
+@cloup.option("--t7-seq", default="TTCTAATACGACTCACTATA", help="t7 promoter sequence")
+@cloup.option("--threads", default=1, help="number of threads to use")
+@cloup.argument("csvs", nargs=-1)
 def opools(
     csvs: List[str],
     ntype: str,
@@ -265,12 +450,12 @@ def opools(
 
 
 @cli.command(help="generate required files for primer assemblies")
-@click.argument("construct_csv")
-@click.argument("primer_csv")
-@click.option("--ignore-missing-t7", is_flag=True, help="ignore t7 promoter")
-@click.option("--ignore-missing-rt-seq", is_flag=True, help="ignore rt seq")
-@click.option("--t7-seq", default="TTCTAATACGACTCACTATA", help="t7 promoter sequence")
-@click.option("--overwrite", is_flag=True, help="overwrite existing files")
+@cloup.argument("construct_csv")
+@cloup.argument("primer_csv")
+@cloup.option("--ignore-missing-t7", is_flag=True, help="ignore t7 promoter")
+@cloup.option("--ignore-missing-rt-seq", is_flag=True, help="ignore rt seq")
+@cloup.option("--t7-seq", default="TTCTAATACGACTCACTATA", help="t7 promoter sequence")
+@cloup.option("--overwrite", is_flag=True, help="overwrite existing files")
 def assembly(
     construct_csv,
     primer_csv,
@@ -312,29 +497,18 @@ def assembly(
         centry = get_construct_entry(df_row, row["name"], code, ignore_missing_t7)
         last_code = code
         constructs.append(centry)
-    log_constructs(constructs)
-    log_primers(all_primers)
     df_primers["primer_code"] = df_primers["primer_name"].apply(lambda x: p_codes[x])
     df_primers["code"] = df_primers["name"].apply(lambda x: codes[x])
     df_primers = df_primers[
         ["name", "code", "primer_num", "primer_name", "primer_code"]
     ]
     df_primers.to_csv("seq-deposit-output/assemblies.csv", index=False)
-    if not dry_run:
-        log.info("updating log csv ")
-        log_new_libaries(params, [construct_csv], [";".join(codes)])
-
-
-# TODO looks at a finalized directory and preps files from that like a final/ directory
-@cli.command()
-def directory():
-    pass
 
 
 # TODO refactor this should supply either an csv and code
 @cli.command(help="update libraries")
-@click.argument("construct_csv")
-@click.argument("csvs", nargs=-1)
+@cloup.argument("construct_csv")
+@cloup.argument("csvs", nargs=-1)
 def update_libraries(construct_csv, csvs):
     params = get_params()
     df_construct = pd.read_csv(construct_csv)
@@ -364,7 +538,7 @@ def get_last_code():
 
 # TODO search by name size etc return csv with results
 @cli.command()
-@click.option("--code", default=None, help="code of the sequence")
+@cloup.option("--code", default=None, help="code of the sequence")
 def get_sequence_info(code):
     setup_logging()
     df = get_sequence_sheet()
@@ -394,8 +568,8 @@ def get_sequence_info(code):
 
 # TODO takes a seq-desposit directory and actually transfers files!
 @cli.command()
-@click.option("--deposit-path", default=None, help="deposit path")
-@click.option("--force", is_flag=True, help="force copy of files")
+@cloup.option("--deposit-path", default=None, help="deposit path")
+@cloup.option("--force", is_flag=True, help="force copy of files")
 def deposit(deposit_path, force):
     # check if the deposit path exists if not use supplied option
     # deposit_files(df, code, params["deposit_path"], dry_run, ignore_missing_t7)
@@ -415,7 +589,7 @@ def deposit(deposit_path, force):
 
 
 @cli.command()
-@click.option("--debug", is_flag=True, help="debug mode")
+@cloup.option("--debug", is_flag=True, help="debug mode")
 def check_sequence_sheet(debug):
     setup_logging()
     if not debug:
@@ -428,6 +602,8 @@ def check_sequence_sheet(debug):
             if not validate_rna_csv(row, seq_path):
                 row_df = get_rna_dataframe_from_row(row, df.columns)
                 deposit_rna_csv(row_df, row["code"], seq_path)
+            if not validate_dna_csv(row, seq_path):
+                print("not a valid DNA sequence")
             # df_rna = pd.read_csv(f"{seq_path}/rna/{row['code']}.csv")
             # df_dna = pd.read_csv(f"{seq_path}/dna/{row['code']}.csv")
             # df_fasta = fasta_to_dataframe(f"{seq_path}/fastas/{row['code']}.fasta")
