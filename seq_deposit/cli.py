@@ -442,7 +442,7 @@ def deposit(deposit_path, force):
         shutil.copy(csv, f"{deposit_path}/rna/")
     fasta_files = glob.glob("seq-deposit-output/fastas/*.fasta")
     for fasta in fasta_files:
-         if os.path.isfile(f"{deposit_path}/rna/{fasta}") and not force:
+        if os.path.isfile(f"{deposit_path}/rna/{fasta}") and not force:
             log.error(f"file exists: {csv} in fasta use --force to overwrite")
             return
         shutil.copy(fasta, f"{deposit_path}/fastas/")
