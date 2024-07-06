@@ -21,7 +21,7 @@ import sys
 
 # logging #####################################################################
 
-APP_LOGGER_NAME = "SEQ_DEPOSIT"
+APP_LOGGER_NAME = "seq-deposit"
 
 
 def setup_logging(file_name: str = None) -> logging.Logger:

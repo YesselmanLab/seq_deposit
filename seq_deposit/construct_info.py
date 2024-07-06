@@ -16,7 +16,7 @@ from seq_deposit.logger import get_logger
 from seq_deposit.settings import LIB_PATH
 
 
-log = get_logger(__name__)
+log = get_logger("construct-info")
 
 
 def get_seq_fwd_primer_code(df: pd.DataFrame) -> str:
@@ -109,7 +109,10 @@ def get_construct_entry(
         construct_info["rev_p"] = "P001F"
     construct_info["dna_len"] = round(df_dna["length"].mean())
     construct_info["rna_len"] = round(df_rna["length"].mean())
-    construct_info["seq_rev_p"] = get_seq_fwd_primer_code(df_rna)
+    fwd_primer = get_seq_fwd_primer_code(df_rna)
+    if fwd_primer == "":
+        log.warning("No fwd primer found for construct %s", code)
+    construct_info["seq_rev_p"] = fwd_primer
     return construct_info
 
 
