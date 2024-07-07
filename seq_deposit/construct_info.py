@@ -1,14 +1,8 @@
-"""
-handles processing of google sheets data
-"""
-
 import os
 import pandas as pd
-from dataclasses import dataclass
 from typing import Dict, Any
 
 from seq_tools import to_dna, get_length, trim, has_5p_sequence
-import vienna
 
 from gsheets.sheet import get_sequence_sheet, get_oligo_sheet
 

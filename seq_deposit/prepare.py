@@ -117,7 +117,6 @@ def generate_dna_dataframe(
                 return None
         df_dna = add(df_dna, t7_seq, "")
     df_dna = to_dna(df_dna)
-    df_dna = df_dna[["name", "sequence"]]
     df_dna = get_length(df_dna)
     return df_dna
 
@@ -160,6 +159,5 @@ def generate_rna_dataframe(
             df_rna = run_func_in_parallel(fold, df_rna, p)
         else:
             df_rna = fold(df_rna)
-    df_rna = df_rna[["name", "sequence", "structure", "ens_defect"]]
     df_rna = get_length(df_rna)
     return df_rna

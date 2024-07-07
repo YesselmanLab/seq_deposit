@@ -12,12 +12,11 @@ from pathlib import Path
 from typing import List, Dict, Any
 from tabulate import tabulate
 
-from seq_tools import to_fasta, to_dna
+from seq_tools import to_fasta, to_dna, to_rna, add
 
 from gsheets.sheet import get_next_code, get_sequence_sheet, get_oligo_sheet
 
 from seq_deposit.logger import setup_logging, get_logger
-from seq_deposit.deposit import deposit_files, deposit_rna_csv
 from seq_deposit.prepare import generate_dna_dataframe, generate_rna_dataframe
 from seq_deposit.construct_info import get_construct_entry
 
@@ -293,16 +292,17 @@ def opools(
     Args:
         csvs (List[str]): List of CSV file paths.
         ntype (str): Type of nucleic acid. Default is "DNA".
-        ignore_missing_t7 (bool): Flag to ignore t7 promoter. Default is False.
-        ignore_missing_rt_seq (bool): Flag to ignore rt seq. Default is False.
-        t7_seq (str): t7 promoter sequence. Default is "TTCTAATACGACTCACTATA".
-        threads (int): Number of threads to use. Default is 1.
-        overwrite (bool): Flag to overwrite existing files. Default is False.
-
     Returns:
         None
     """
     setup(kwargs)
+    log.info("processing %d csvs", len(csvs))
+    log.info("ntype: %s", ntype)
+    del kwargs["overwrite"]
+    del kwargs["rt_seq"]
+    if len(csvs) == 0:
+        log.error("no csvs supplied")
+        return
     dfs = []
     for csv in csvs:
         df = pd.read_csv(csv)
@@ -311,59 +311,40 @@ def opools(
         dfs.append(df)
     df = pd.concat(dfs)
     if ntype == "DNA":
-        df.rename(columns={"sequence": "dna_sequence"}, inplace=True)
+        df_rna = generate_rna_dataframe(df, ntype, **kwargs)
+        if df_rna is None:
+            log.error("rna generation failed")
+            return
+        df_rna["dna_sequence"] = df["sequence"]
+        df = df_rna
+    else:
+        df_dna = to_dna(df)
+        df_dna = add(df_dna, kwargs["t7_seq"], "")
+        if "structure" or "ens_defect" not in df.columns:
+            df = generate_rna_dataframe(df, ntype, **kwargs)
+        df["dna_sequence"] = df_dna["sequence"]
+    process_constructs(df)
 
 
 @cli.command(help="generate required files for primer assemblies")
-@cloup.argument("results_csv")
+@cloup.argument("results_json", type=cloup.Path(exists=True))
 @common_options()
 def assembly(
-    construct_csv,
-    primer_csv,
-    ignore_missing_t7,
-    ignore_missing_rt_seq,
-    t7_seq,
-    overwrite,
+    results_json: str,
+    **kwargs,
 ):
-    setup(ignore_missing_t7, ignore_missing_rt_seq, t7_seq, overwrite)
-    last_code, last_primer_code = get_last_codes()
-    df_constructs = pd.read_csv(construct_csv)
-    df_primers = pd.read_csv(primer_csv)
-    log.info("processing %s it has %d sequences", construct_csv, len(df_constructs))
-    constructs = []
-    p_codes = {}
-    codes = {}
-    all_primers = []
-    for _, row in df_constructs.iterrows():
-        df_row = pd.DataFrame([row], columns=df_constructs.columns, index=[0])
-        df_primers_sub = df_primers[df_primers["name"] == row["name"]]
-        code = get_next_code(last_code)
-        codes[row["name"]] = code
-        for _, p_row in df_primers_sub.iterrows():
-            if p_row["primer_name"] not in p_codes:
-                p_codes[p_row["primer_name"]] = get_next_code(last_primer_code)
-                last_primer_code = p_codes[p_row["primer_name"]]
-                all_primers.append(
-                    [
-                        p_row["primer_name"],
-                        last_primer_code,
-                        code,
-                        "UNK",
-                        "N/A",
-                        p_row["primer_sequence"],
-                        "ASSEMBLY",
-                    ]
-                )
-        deposit_files(df_row, code, params["deposit_path"], dry_run, ignore_missing_t7)
-        centry = get_construct_entry(df_row, row["name"], code, ignore_missing_t7)
-        last_code = code
-        constructs.append(centry)
-    df_primers["primer_code"] = df_primers["primer_name"].apply(lambda x: p_codes[x])
-    df_primers["code"] = df_primers["name"].apply(lambda x: codes[x])
-    df_primers = df_primers[
-        ["name", "code", "primer_num", "primer_name", "primer_code"]
-    ]
-    df_primers.to_csv("seq-deposit-output/assemblies.csv", index=False)
+    setup(kwargs)
+    del kwargs["overwrite"]
+    del kwargs["rt_seq"]
+    df = pd.read_json(results_json)
+    df_rna = generate_rna_dataframe(df, "DNA", **kwargs)
+    if df_rna is None:
+        log.error("rna generation failed")
+        return
+    df_rna["dna_sequence"] = df["sequence"]
+    df_rna["construct"] = df["name"]
+    df_rna["type"] = "ASSEMBLY"
+    process_constructs(df_rna)
 
 
 @cli.command(help="get last code")
@@ -411,7 +392,6 @@ def get_sequence_info(code):
 @cloup.option("--force", is_flag=True, help="force copy of files")
 def deposit(deposit_path, force):
     # check if the deposit path exists if not use supplied option
-    # deposit_files(df, code, params["deposit_path"], dry_run, ignore_missing_t7)
     setup_logging()
     output = input(
         "are you sure you want to deposit all files (i.e. did you check they are corect)? [y/n]"
