@@ -1,6 +1,7 @@
 """
 setup script for seq_deposit
 """
+
 # !/usr/bin/env python
 
 import os
