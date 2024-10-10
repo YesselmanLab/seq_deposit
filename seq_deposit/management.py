@@ -1,6 +1,12 @@
+import pandas as pd
+import os
+import glob
 import cloup
+from pathlib import Path
 
 from seq_deposit.logger import get_logger, setup_logging
+
+from gsheets.sheet import get_next_code, get_sequence_sheet, get_oligo_sheet
 
 log = get_logger("management")
 
@@ -13,7 +19,6 @@ def get_rna_dataframe_from_row(row, columns):
         axis=1,
         inplace=True,
     )
-    row_df = generate_rna_dataframe(row_df, "RNA")
     return row_df
 
 
@@ -25,7 +30,6 @@ def get_dna_dataframe_from_row(row, columns):
         axis=1,
         inplace=True,
     )
-    row_df = generate_dna_dataframe(row_df, "DNA")
     return row_df
 
 
@@ -98,18 +102,19 @@ def cli():
 @cloup.option("--debug", is_flag=True, help="debug mode")
 def check_sequence_sheet(debug):
     setup_logging()
-    if not debug:
-        log.info("backing up sequence and oligo directory")
-        os.system("zip -r sequences_and_oligos.zip $SEQPATH")
+    # if not debug:
+    #    log.info("backing up sequence and oligo directory")
+    #    os.system("zip -r sequences_and_oligos.zip $SEQPATH")
     df = get_sequence_sheet()
     seq_path = os.environ["SEQPATH"]
     for i, row in df.iterrows():
         if row["type"] == "ASSEMBLY" and row["usuable"] != "NO":
             if not validate_rna_csv(row, seq_path):
                 row_df = get_rna_dataframe_from_row(row, df.columns)
-                deposit_rna_csv(row_df, row["code"], seq_path)
+                # deposit_rna_csv(row_df, row["code"], seq_path)
             if not validate_dna_csv(row, seq_path):
-                print("not a valid DNA sequence")
+                pass
+                # print("not a valid DNA sequence")
             # df_rna = pd.read_csv(f"{seq_path}/rna/{row['code']}.csv")
             # df_dna = pd.read_csv(f"{seq_path}/dna/{row['code']}.csv")
             # df_fasta = fasta_to_dataframe(f"{seq_path}/fastas/{row['code']}.fasta")

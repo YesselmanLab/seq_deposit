@@ -1,6 +1,7 @@
 *.py[cod]
 *.idea
 *.vscode
+*__pycache__
 
 # generated files 
 seq_deposit/resources/all.csv

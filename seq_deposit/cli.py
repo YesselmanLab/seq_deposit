@@ -16,6 +16,11 @@ from seq_tools import to_fasta, to_dna, to_rna, add
 
 from gsheets.sheet import get_next_code, get_sequence_sheet, get_oligo_sheet
 
+from seq_deposit.management import (
+    get_rna_dataframe_from_row,
+    get_dna_dataframe_from_row,
+    fasta_to_dataframe,
+)
 from seq_deposit.logger import setup_logging, get_logger
 from seq_deposit.prepare import generate_rna_dataframe
 from seq_deposit.process import process_constructs
@@ -201,17 +206,6 @@ def assembly(
     process_constructs(df_rna)
 
 
-"""
-@cli.command(help="get last code")
-def get_last_code():
-    params = get_params()
-    df_seqs = fetch_sequence_gsheet(params)
-    df_primers = fetch_primers_gsheet(params)
-    print(df_seqs.iloc[-1])
-    print(df_primers.iloc[-1])
-"""
-
-
 # TODO search by name size etc return csv with results
 @cli.command()
 @cloup.option("--code", default=None, help="code of the sequence")
@@ -242,7 +236,6 @@ def get_sequence_info(code):
         print("-" * 40)
 
 
-# TODO takes a seq-desposit directory and actually transfers files!
 @cli.command()
 @cloup.option("--deposit-path", default=None, help="deposit path")
 @cloup.option("--force", is_flag=True, help="force copy of files")
@@ -282,6 +275,42 @@ def deposit(deposit_path, force):
             log.error(f"file exists: {csv} in fasta use --force to overwrite")
             return
         shutil.copy(fasta, f"{deposit_path}/fastas/")
+
+
+@cli.command()
+@cloup.argument("code")
+@cloup.option("--deposit-path", default=None, help="deposit path")
+def generate_files(code, deposit_path):
+    setup_logging()
+    if deposit_path is None:
+        deposit_path = os.environ.get("SEQPATH")
+    if deposit_path is None:
+        log.error("no deposit path supplied")
+        return
+    df = get_sequence_sheet()
+    df = df[df["code"] == code]
+    if len(df) == 0:
+        log.error(f"code {code} not found")
+        return
+    if len(df) > 1:
+        log.error("more than one row found")
+        return
+    if os.path.isfile(f"{deposit_path}/rna/{code}.csv"):
+        log.error(f"file exists: {code}.csv in RNA")
+        return
+    if os.path.isfile(f"{deposit_path}/dna/{code}.csv"):
+        log.error(f"file exists: {code}.csv in DNA")
+        return
+    if os.path.isfile(f"{deposit_path}/fastas/{code}.fasta"):
+        log.error(f"file exists: {code}.fasta in fastas")
+        return
+    row = df.iloc[0]
+    rna_df = get_rna_dataframe_from_row(row, df.columns)
+    dna_df = get_dna_dataframe_from_row(row, df.columns)
+    fasta_df = to_dna(rna_df)
+    rna_df.to_csv(f"{deposit_path}/rna/{code}.csv", index=False)
+    dna_df.to_csv(f"{deposit_path}/dna/{code}.csv", index=False)
+    to_fasta(fasta_df, f"{deposit_path}/fastas/{code}.fasta")
 
 
 if __name__ == "__main__":

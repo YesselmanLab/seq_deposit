@@ -48,6 +48,7 @@ setup(
     entry_points={
         "console_scripts": [
             "seq-deposit = seq_deposit.cli:cli",
+            "seq-deposit-validate = seq_deposit.management:cli",
         ]
     },
 )
